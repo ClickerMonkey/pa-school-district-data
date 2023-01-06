@@ -1,0 +1,430 @@
+<html>
+<head>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" integrity="sha256-kLaT2GOSpHechhsozzB+flnD+zUyjE2LlfWPgU04xyI=" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js" integrity="sha256-WBkoXOwTeyKclOHuWtc+i2uENFpDZ9YPdf5Hf+D7ewM=" crossorigin=""></script>
+  <script src="data.js"></script>
+  <script src="geojson.js"></script>
+</head>
+<body style="padding:0; margin:0;">
+  <div style="display:flex; flex-direction:column; width:100%; height:100%;">
+    <div style="padding:4px; flex:0;">
+      <label for="Visual">
+        Visual
+      </label>
+      <select id="Visual" oninput="onVisualChange(event)">
+        <option value="ColorDistricts">Rainbow districts</option>
+        <option value="ColorDots">Rainbow dots</option>
+        <option value="ScaleDots">Scale dots</option>
+      </select>
+      <label for="Metric">
+        Metric
+      </label>
+      <select id="Metric" oninput="onMetricChange(event)">
+        <option value="EconomicallyDisadvantaged">Economically disadvantaged?</option>
+        <option value="EnglishLanguageLearners">English language learners?</option>
+        <option value="NumberOfSchools">Number of schools</option>
+        <option value="NumberOfSchoolCounselors">Number of school counselors</option>
+        <option value="SchoolCounselorRatio">School counselor ratio</option>
+        <option value="Enrollment">Enrollment</option>
+      </select>
+      <label>
+        <input type="checkbox" oninput="onCheckInput(event)" checked>
+        Adjust for outliers
+      </label>
+    </div>
+    <div id="map" style="flex:1 1 100%;"></div>
+  </div>
+  
+<script>
+  var map = L.map('map', {
+    renderer: L.canvas(),
+  });
+
+  // Find min/max bounds.
+  var min = L.latLng(41.99967385098277, -77.17156307494294);
+  var max = L.latLng(41.99967385098277, -77.17156307494294);
+  for (var feature of geojson.features) {
+    var edges = [];
+
+    for (var path of feature.geometry.coordinates) {
+      for (var line of path) {
+        for (var coord of line) {
+          if (isNumber(coord[0]) && isNumber(coord[1])) {
+            edges.push({x: coord[0], y: coord[1]});
+            min.lng = Math.min(min.lng, coord[0]);
+            min.lat = Math.min(min.lat, coord[1]);
+            max.lng = Math.max(max.lng, coord[0]);
+            max.lat = Math.max(max.lat, coord[1]);
+          }
+        }
+      }
+    }
+
+    var center = getCentroid(edges);
+    feature.properties.center = L.latLng(center.y, center.x);
+  }
+
+  var minDistance = Number.MAX_VALUE;
+  var minFeat1 = null;
+  var minFeat2 = null;
+
+  for (var feat1 of geojson.features) {
+    for (var feat2 of geojson.features) {
+      if (feat1 !== feat2) {
+        var a = feat1.properties.center;
+        var b = feat2.properties.center;
+        var dist = distanceSq(a, b);
+        if (dist < minDistance) {
+          minDistance = dist;
+          minFeat1 = feat1
+          minFeat2 = feat2
+        }
+      }
+    }
+  }
+
+  var bounds = L.latLngBounds(min, max);
+
+  var radius = minFeat1.properties.center.distanceTo(minFeat2.properties.center);
+  var circleIcon = L.divIcon({className: 'circle-icon'});
+
+  var circleMarkers = [];
+
+  var featureBySchoolDistrict = {};
+  for (var feature of geojson.features) {
+    var key = feature.properties.school_dis;
+    if (key in featureBySchoolDistrict) {
+      // console.log('duplicate feature', key);
+    } else {
+      featureBySchoolDistrict[key] = feature;
+    }
+
+    feature.properties.marker = L.circle(feature.properties.center, {radius: radius, interactive: false});
+
+    circleMarkers.push(feature.properties.marker);
+  }
+
+  var markerLayer = L.layerGroup(circleMarkers);
+
+  var demoBySchoolDistrict = {};
+  for (var demoData of data['District Demographic Data']) {
+    var key = demoData.DistrictName;
+    if (key in demoBySchoolDistrict) {
+      // console.log('duplicate demoData', key);
+    } else {
+      demoBySchoolDistrict[key] = demoData;
+    }
+  }
+
+  for (const districtName in featureBySchoolDistrict) {
+    if (!(districtName in demoBySchoolDistrict)) {
+      // console.log(districtName, 'not in data')
+    }
+  }
+  for (const districtName in demoBySchoolDistrict) {
+    if (!(districtName in featureBySchoolDistrict)) {
+      // console.log(districtName, 'not in geojson')
+    }
+  }
+
+  // { feature, data, schools }
+  var mapData = {};
+  for (const districtName in demoBySchoolDistrict) {
+    mapData[districtName] = {
+      data: demoBySchoolDistrict[districtName],
+      schools: [],
+    };
+  }
+  for (const districtName in featureBySchoolDistrict) {
+    var district = mapData[districtName];
+    if (district) {
+      district.feature = featureBySchoolDistrict[districtName];
+    }
+  }
+  for (const school of data['School Building-Ratio Data']) {
+    var district = mapData[school.DistrictName]
+    if (district) {
+      district.schools.push(school);
+    }
+  }
+
+  var metrics = {
+    EconomicallyDisadvantaged: {},
+    EnglishLanguageLearners: {},
+    NumberOfSchools: {},
+    NumberOfSchoolCounselors: {},
+    SchoolCounselorRatio: {},
+    Enrollment: {},
+  }
+  for (var districtName in mapData) {
+    var district = mapData[districtName];
+    metrics.NumberOfSchools[districtName] = district.schools.length;
+    metrics.EconomicallyDisadvantaged[districtName] = district.data['Econ Dis?'];
+    metrics.EnglishLanguageLearners[districtName] = district.data['ELLs?'];
+    metrics.NumberOfSchoolCounselors[districtName] = 0;
+    metrics.Enrollment[districtName] = 0;
+    for (var school of district.schools) {
+      var enrollment = school['Build Enrol (21-22)'];
+      if (isNumber(enrollment)) {
+        metrics.Enrollment[districtName] += enrollment;
+      }
+      var counselors = school['# of SCs Assigned (21-22)'];
+      if (isNumber(counselors)) {
+        metrics.NumberOfSchoolCounselors[districtName] += counselors;
+      }
+    }
+    metrics.SchoolCounselorRatio[districtName] = Math.floor(div(metrics.Enrollment[districtName], metrics.NumberOfSchoolCounselors[districtName]));
+  }
+
+  var minMax = getMinMaxs();
+  var metricList = Object.keys(metrics);
+
+  var currentMetric = 'EconomicallyDisadvantaged'; 
+  var currentVisual = 'ColorDistricts';
+  var excludeOutliers = true;
+
+  var COLORS = [
+    {r: 255, g: 0, b: 0},
+    {r: 255, g: 165, b: 0},
+    {r: 255, g: 255, b: 0},
+    {r: 0, g: 255, b: 0},
+    {r: 0, g: 0, b: 255},
+    {r: 165, g: 0, b: 255},
+  ]
+
+  // Load map data
+  var geojsonObject = L.geoJSON(geojson, {
+    style: getFeatureStyle,
+  }).bindPopup(function (layer) {
+    return getFeaturePopupContent(layer.feature);
+  });
+
+
+
+  geojsonObject.addTo(map);
+  map.fitBounds(bounds);
+
+  function distanceSq(a, b) {
+    var dlng = a.lng - b.lng;
+    var dlat = a.lat - b.lat;
+    return dlng * dlng + dlat * dlat;
+  }
+  function isNumber(v) {
+    return typeof v === 'number' && isFinite(v);
+  }
+  function getMinMax(obj) {
+    var values = Object.values(obj);
+    var min = getMin(values);
+    var max = getMax(values);
+
+    if (excludeOutliers) {
+      var mean = getMean(values);
+      var stddev = getStandardDeviation(values);
+      var outlierMin = mean - stddev*3;
+      var outlierMax = mean + stddev*3;
+
+      min = Math.max(min, outlierMin);
+      max = Math.min(max, outlierMax);
+    }
+
+    return [min, max];
+  }
+  function getMean(array) {
+    const n = array.length;
+    return array.reduce((a, b) => a + b) / n;
+  }
+  function getMin(array) {
+    return array.reduce((a, b) => Math.min(a, b), Number.MAX_VALUE);
+  }
+  function getMax(array) {
+    return array.reduce((a, b) => Math.max(a, b), -Number.MAX_VALUE);
+  }
+  function getStandardDeviation(array) {
+    const n = array.length;
+    const mean = array.reduce((a, b) => a + b) / n;
+    return Math.sqrt(array.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b) / n);
+  }
+  function div(a, b) {
+    return b == 0 ? 0 : a / b;
+  }
+  function getDelta(value, min, max) {
+    return (max - value) / (max - min);
+  }
+  function interpolate(delta, start, end) {
+    return (delta * end) + ((1 - delta) * start);
+  }
+  function interpolateColors(delta, colors) {
+    var n = colors.length - 1;
+    var dl = delta * n;
+    var ds = clamp(Math.floor(dl), 0, n);
+    var de = clamp(ds+1, 0, n);
+    var id = getDelta(dl, ds, de);
+
+    return interpolateColor(id, colors[ds], colors[de]);
+  }
+  function getMinMaxs() {
+    return {
+      EconomicallyDisadvantaged: getMinMax(metrics.EconomicallyDisadvantaged),
+      EnglishLanguageLearners: getMinMax(metrics.EnglishLanguageLearners),
+      NumberOfSchools: getMinMax(metrics.NumberOfSchools),
+      NumberOfSchoolCounselors: getMinMax(metrics.NumberOfSchoolCounselors),
+      SchoolCounselorRatio: getMinMax(metrics.SchoolCounselorRatio),
+      Enrollment: getMinMax(metrics.Enrollment),
+    }
+  }
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
+  function interpolateColor(delta, start, end) {
+    var r = interpolate(delta, start.r, end.r);
+    var g = interpolate(delta, start.g, end.g);
+    var b = interpolate(delta, start.b, end.b);
+    return formatColor(r, g, b);
+  }
+  function formatColor(r, g, b) {
+    return '#' + 
+      padLeft(Math.floor(r).toString(16), 2, '0') + 
+      padLeft(Math.floor(g).toString(16), 2, '0') + 
+      padLeft(Math.floor(b).toString(16), 2, '0');
+  }
+  function padLeft(x, n, pad){
+    var padded = String(x);
+    while (padded.length < n) {
+      padded = pad + padded;
+    }
+    return padded;
+  }
+  function getCentroid(points) {
+    var ans = {x: 0, y: 0};
+    var n = points.length;
+    var signedArea = 0;
+    for (var i = 0; i < n; i++) {
+        var x0 = points[i].x, y0 = points[i].y;
+        var x1 = points[(i + 1) % n].x, y1 = points[(i + 1) % n].y;
+        var A = (x0 * y1) - (x1 * y0);
+        signedArea += A;
+        ans.x += (x0 + x1) * A;
+        ans.y += (y0 + y1) * A;
+    }
+    signedArea *= 0.5;
+    ans.x = (ans.x) / (6 * signedArea);
+    ans.y = (ans.y) / (6 * signedArea);
+    return ans;
+  }
+  function getFeaturePopupContent(feature) {
+    var key = feature.properties.school_dis;
+    var districtValue = metrics[currentMetric][key];
+
+    return key + ': ' + districtValue;
+  }
+  function getFeatureStyle(feature) {
+    var key = feature.properties.school_dis;
+    var district = mapData[key];
+    if (!district) {
+      return {
+        weight: 1,
+        color: '#f00',
+        fillColor: '#f00',
+        fillOpacity: 0.5,
+      };
+    }
+
+    if (currentVisual != 'ColorDistricts') {
+      return {
+        weight: 1,
+        color: '#666',
+        fillColor: '#666',
+        fillOpacity: 0.5,
+      };
+    }
+
+    var districtMinMax = minMax[currentMetric];
+    var districtValue = metrics[currentMetric][key];
+    var delta = getDelta(districtValue, districtMinMax[0], districtMinMax[1]);
+    var districtColor = interpolateColors(delta, COLORS);
+
+    // console.log(key, districtColor);
+
+    return {
+      weight: 1,
+      color: '#000',
+      opacity: 0.1,
+      fillColor: districtColor,
+      fillOpacity: 0.5,
+    };
+  }
+  function updateMarkers() {
+    var isColorMarker = currentVisual === 'ColorDots';
+    var isSizeMarker = currentVisual === 'ScaleDots';
+
+    if (!isColorMarker && !isSizeMarker) {
+      return;
+    }
+
+    for (var feature of geojson.features) {
+      var key = feature.properties.school_dis;
+      var districtMinMax = minMax[currentMetric];
+      var districtValue = metrics[currentMetric][key];
+      var delta = getDelta(districtValue, districtMinMax[0], districtMinMax[1]);
+      var marker = feature.properties.marker;
+
+      if (!isNumber(delta)) {
+        marker.setRadius(0);
+        continue;
+      }
+
+      if (isColorMarker) {
+        var districtColor = interpolateColors(delta, COLORS);
+
+        marker.setRadius(radius*3);
+        marker.setStyle({
+          weight: 0,
+          color: districtColor,
+          fillOpacity: 1.0,
+        });
+      }
+      if (isSizeMarker) {
+        var districtSize = interpolate(delta, radius, radius*10);
+
+        marker.setRadius(districtSize);
+        marker.setStyle({
+          weight: 0,
+          color: '#000',
+          fillOpacity: 0.5,
+        });
+      }
+    }
+  }
+  function onMetricChange(evt) {
+    currentMetric = evt.target.value;
+    updateMarkers();
+    geojsonObject.resetStyle();
+  }
+  function onVisualChange(evt) {
+    currentVisual = evt.target.value;
+    if (currentVisual === 'ColorDistricts') {
+      markerLayer.remove();
+    } else {
+      updateMarkers();
+      markerLayer.addTo(map);
+    }
+    geojsonObject.resetStyle();
+  }
+  function onCheckInput(evt) {
+    excludeOutliers = evt.target.checked;
+    minMax = getMinMaxs();
+    updateMarkers();
+    geojsonObject.resetStyle();
+  }
+</script>
+<style>
+  .circle-icon {
+    border-radius: 50%;
+    color: red;
+    width: 4px;
+    height: 4px;
+    display: absolute;
+  }
+</style>
+</body>
+</html>
