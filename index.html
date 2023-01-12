@@ -4,6 +4,14 @@
   <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js" integrity="sha256-WBkoXOwTeyKclOHuWtc+i2uENFpDZ9YPdf5Hf+D7ewM=" crossorigin=""></script>
   <script src="data.js"></script>
   <script src="geojson.js"></script>
+  <style>
+    .leaflet-popup-content-wrapper {
+      padding: 0 !important;
+    }
+    .leaflet-popup-content {
+      margin: 0 !important;
+    }
+  </style>
 </head>
 <body style="padding:0; margin:0;">
   <div style="display:flex; flex-direction:column; width:100%; height:100%;">
@@ -33,6 +41,126 @@
       </label>
     </div>
     <div id="map" style="flex:1 1 100%;"></div>
+    <script type="text/template" id="districtTable">
+      <table style="background:white; color:black; font-size:12px;" border="1" cellpadding="4" cellspacing="0">
+        <tbody>
+          <tr>
+            <td colspan="5" style="background:#1eb1ed; color:white; font-size:16px; text-align:center; font-weight:bold;">
+              {DistrictName}
+            </td>
+          </tr>
+          <tr>
+            <td colspan="5" style="background:#92e2fd; color:black; font-size:14px; text-align:center;">
+              District Demographic Overview
+            </td>
+          </tr>
+          <tr>
+            <td colspan="2" style="text-align:right;">
+              Economically Disadvantaged
+            </td>
+            <td colspan="3">
+              {Econ Dis?}
+            </td>
+          </tr>
+          <tr>
+            <td colspan="2" style="text-align:right;">
+              English Language Learners
+            </td>
+            <td colspan="3">
+              {ELLs?}
+            </td>
+          </tr>
+          <tr>
+            <td colspan="2" style="text-align:right;">
+              White
+            </td>
+            <td colspan="3">
+              {White}
+            </td>
+          </tr>
+          <tr>
+            <td colspan="2" style="text-align:right;">
+              Hispanic
+            </td>
+            <td colspan="3">
+              {Hispanic}
+            </td>
+          </tr>
+          <tr>
+            <td colspan="2" style="text-align:right;">
+              Black/AA
+            </td>
+            <td colspan="3">
+              {Black/AA}
+            </td>
+          </tr>
+          <tr>
+            <td colspan="2" style="text-align:right;">
+              Asian
+            </td>
+            <td colspan="3">
+              {Asian}
+            </td>
+          </tr>
+          <tr>
+            <td colspan="2" style="text-align:right;">
+              2 or More Races
+            </td>
+            <td colspan="3">
+              {2 or More Races}
+            </td>
+          </tr>
+          <tr>
+            <td colspan="2" style="text-align:right;">
+              Native American/Alaskan Native
+            </td>
+            <td colspan="3">
+              {Native American/Alaskan Native}
+            </td>
+          </tr>
+          <tr>
+            <td colspan="2" style="text-align:right;">
+              Native Hawaiian or other Pacific Islander
+            </td>
+            <td colspan="3">
+              {Native Hawaiian or other Pacific Islander }
+            </td>
+          </tr>
+          <tr>
+            <td colspan="5" style="background:#92e2fd; color:black; font-size:14px; text-align:center;">
+              Student to School Counselor Ratios (21-22)
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#fee59d; color:black; font-size:12px; text-align:center; font-style:italic;">
+              School Building Name
+            </td>
+            <td style="background:#fee59d; color:black; font-size:12px; text-align:center; font-style:italic;">
+              Title I
+            </td>
+            <td style="background:#fee59d; color:black; font-size:12px; text-align:center; font-style:italic;">
+              Enrollment
+            </td>
+            <td style="background:#fee59d; color:black; font-size:12px; text-align:center; font-style:italic;">
+              # of SC Assigned
+            </td>
+            <td style="background:#fee59d; color:black; font-size:12px; text-align:center; font-style:italic;">
+              Ratio
+            </td>
+          </tr>
+          {schools}
+        </tbody>
+      </table>
+    </script>
+    <script type="text/template" id="schoolRow">
+      <tr>
+        <td>{SchoolName}</td>
+        <td>{Title I}</td>
+        <td>{Build Enrol (21-22)}</td>
+        <td>{# of SCs Assigned (21-22)}</td>
+        <td>{Ratio (21-22)}</td>
+      </tr>
+    </script>
   </div>
   
 <script>
@@ -197,6 +325,11 @@
     style: getFeatureStyle,
   }).bindPopup(function (layer) {
     return getFeaturePopupContent(layer.feature);
+  }, {
+    maxWidth: 800,
+    minWidth: 400,
+    autoPan: true,
+    keepInView: true,
   });
 
 
@@ -311,11 +444,51 @@
     ans.y = (ans.y) / (6 * signedArea);
     return ans;
   }
+
+  var schoolRowTemplate = templatize(document.getElementById('schoolRow').textContent)
+  var districtTableTemplate = templatize(document.getElementById('districtTable').textContent)
+
   function getFeaturePopupContent(feature) {
     var key = feature.properties.school_dis;
-    var districtValue = metrics[currentMetric][key];
+    var district = mapData[key];
 
-    return key + ': ' + districtValue;
+    if (!district) {
+      return '';
+    }
+
+    var vars = Object.assign({}, district.data);
+    vars.schools = (district.schools || []).map(function(row) {
+      return schoolRowTemplate(row);
+    }).join('\n');
+
+    return districtTableTemplate(vars);
+  }
+  function toString(x) {
+    if (x === undefined || x === null) {
+      return '';
+    }
+    var s = String(x);
+    if (typeof x === 'number') {
+      var i = s.indexOf('.');
+      if (i !== -1) {
+        var decimals = s.length - i - 1;
+        if (decimals > 2) {
+          s = s.substring(0, i+3)
+        }
+      }
+    }
+    return s;
+  }
+  function templatize(template) {
+    var sections = template.split(/[\{\}]/).map((section, index) => {
+      return index % 2 === 0
+        ? function (source) { return section }
+        : function (source) { return source && section in source ? toString(source[section]) : '' };
+    });
+
+    return function(vars) {
+      return sections.reduce((out, section) => out + section(vars), '');
+    };
   }
   function getFeatureStyle(feature) {
     var key = feature.properties.school_dis;
