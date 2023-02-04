@@ -20,6 +20,7 @@
         Visual
       </label>
       <select id="Visual" oninput="onVisualChange(event)">
+        <option value="AdamColors" selected>Adam colors</option>
         <option value="ColorDistricts">Rainbow districts</option>
         <option value="ColorDots">Rainbow dots</option>
         <option value="ScaleDots">Scale dots</option>
@@ -32,7 +33,7 @@
         <option value="EnglishLanguageLearners">English language learners?</option>
         <option value="NumberOfSchools">Number of schools</option>
         <option value="NumberOfSchoolCounselors">Number of school counselors</option>
-        <option value="SchoolCounselorRatio">School counselor ratio</option>
+        <option value="SchoolCounselorRatio" selected>School counselor ratio</option>
         <option value="Enrollment">Enrollment</option>
       </select>
       <label>
@@ -307,8 +308,8 @@
   var minMax = getMinMaxs();
   var metricList = Object.keys(metrics);
 
-  var currentMetric = 'EconomicallyDisadvantaged'; 
-  var currentVisual = 'ColorDistricts';
+  var currentMetric = 'SchoolCounselorRatio'; 
+  var currentVisual = 'AdamColors';
   var excludeOutliers = true;
 
   var COLORS = [
@@ -319,6 +320,13 @@
     {r: 0, g: 0, b: 255},
     {r: 165, g: 0, b: 255},
   ]
+  var ADAM_COLORS = [
+    colorFromHex('#fc0d1b'),
+    colorFromHex('#fdbf2d'),
+    colorFromHex('#fffd38'),
+    colorFromHex('#1eb1ed'),
+    colorFromHex('#94ce58')
+  ];
 
   // Load map data
   var geojsonObject = L.geoJSON(geojson, {
@@ -490,6 +498,17 @@
       return sections.reduce((out, section) => out + section(vars), '');
     };
   }
+  function colorFromHex(hex) {
+    var rr = hex.substring(1, 3)
+    var gg = hex.substring(3, 5)
+    var bb = hex.substring(5, 7)
+
+    return {
+      r: parseInt(rr, 16),
+      g: parseInt(gg, 16),
+      b: parseInt(bb, 16)
+    };
+  }
   function getFeatureStyle(feature) {
     var key = feature.properties.school_dis;
     var district = mapData[key];
@@ -502,7 +521,7 @@
       };
     }
 
-    if (currentVisual != 'ColorDistricts') {
+    if (currentVisual !== 'ColorDistricts' && currentVisual !== 'AdamColors') {
       return {
         weight: 1,
         color: '#666',
@@ -511,10 +530,36 @@
       };
     }
 
-    var districtMinMax = minMax[currentMetric];
+    var availableColors = COLORS;
     var districtValue = metrics[currentMetric][key];
+
+    if (currentVisual === 'AdamColors') {
+      availableColors = ADAM_COLORS;
+
+      if (currentMetric === 'SchoolCounselorRatio') {
+        const fillColor = districtValue <= 250
+          ? ADAM_COLORS[0]
+          : districtValue <= 350
+            ? ADAM_COLORS[1]
+            : districtValue <= 450
+              ? ADAM_COLORS[2]
+              : districtValue <= 550
+                ? ADAM_COLORS[3]
+                : ADAM_COLORS[4];
+
+        return {
+          weight: 1,
+          color: '#000',
+          opacity: 0.1,
+          fillColor: formatColor(fillColor.r, fillColor.g, fillColor.b),
+          fillOpacity: 1,
+        };
+      }
+    }
+
+    var districtMinMax = minMax[currentMetric];
     var delta = getDelta(districtValue, districtMinMax[0], districtMinMax[1]);
-    var districtColor = interpolateColors(delta, COLORS);
+    var districtColor = interpolateColors(delta, availableColors);
 
     // console.log(key, districtColor);
 
@@ -546,8 +591,13 @@
         continue;
       }
 
+      var availableColors = COLORS;
+      if (currentVisual === 'AdamColors') {
+        availableColors = ADAM_COLORS;
+      }
+
       if (isColorMarker) {
-        var districtColor = interpolateColors(delta, COLORS);
+        var districtColor = interpolateColors(delta, availableColors);
 
         marker.setRadius(radius*3);
         marker.setStyle({
