@@ -16,6 +16,7 @@
 <body style="padding:0; margin:0;">
   <div style="display:flex; flex-direction:column; width:100%; height:100%;">
     <div style="padding:4px; flex:0;">
+      <!--
       <label for="Visual">
         Visual
       </label>
@@ -40,6 +41,9 @@
         <input type="checkbox" oninput="onCheckInput(event)" checked>
         Adjust for outliers
       </label>
+      -->
+      <select id="JumpToDistrict" oninput="onDistrictChange(event)"></select>
+      <select id="JumpToSchool" oninput="onSchoolChange(event)"></select>
     </div>
     <div id="map" style="flex:1 1 100%;"></div>
     <script type="text/template" id="districtTable">
@@ -245,36 +249,63 @@
     }
   }
 
-  for (const districtName in featureBySchoolDistrict) {
+  for (var districtName in featureBySchoolDistrict) {
     if (!(districtName in demoBySchoolDistrict)) {
       // console.log(districtName, 'not in data')
     }
   }
-  for (const districtName in demoBySchoolDistrict) {
+  for (var districtName in demoBySchoolDistrict) {
     if (!(districtName in featureBySchoolDistrict)) {
       // console.log(districtName, 'not in geojson')
     }
   }
 
+  var districtList = [];
+  var schoolList = [];
+
   // { feature, data, schools }
   var mapData = {};
-  for (const districtName in demoBySchoolDistrict) {
+  for (var districtName in demoBySchoolDistrict) {
     mapData[districtName] = {
       data: demoBySchoolDistrict[districtName],
       schools: [],
     };
   }
-  for (const districtName in featureBySchoolDistrict) {
+  for (var districtName in featureBySchoolDistrict) {
     var district = mapData[districtName];
     if (district) {
       district.feature = featureBySchoolDistrict[districtName];
     }
+    districtList.push(districtName);
   }
-  for (const school of data['School Building-Ratio Data']) {
+  for (var school of data['School Building-Ratio Data']) {
     var district = mapData[school.DistrictName]
     if (district) {
       district.schools.push(school);
     }
+    schoolList.push(school);
+  }
+
+  districtList.sort();
+  schoolList.sort(function(a, b) {
+    return a.SchoolName.toLowerCase().localeCompare(b.SchoolName.toLowerCase());
+  });
+
+  var districtJump = document.getElementById("JumpToDistrict");
+  var schoolJump = document.getElementById("JumpToSchool");
+
+  for (var school of schoolList) {
+    var option = document.createElement("option");
+    option.innerHTML = school.SchoolName;
+    option.value = school.DistrictName;
+    schoolJump.appendChild(option);
+  }
+
+  for (var district of districtList) {
+    var option = document.createElement("option");
+    option.innerHTML = district;
+    option.value = district;
+    districtJump.appendChild(option);
   }
 
   var metrics = {
@@ -321,11 +352,11 @@
     {r: 165, g: 0, b: 255},
   ]
   var ADAM_COLORS = [
-    colorFromHex('#fc0d1b'),
-    colorFromHex('#fdbf2d'),
-    colorFromHex('#fffd38'),
-    colorFromHex('#1eb1ed'),
-    colorFromHex('#94ce58')
+    colorFromHex('#94ce58'), // green
+    colorFromHex('#fffd38'), // yellow
+    colorFromHex('#fdbf2d'), // orange
+    colorFromHex('#fc0d1b'), // red
+    colorFromHex('#ff00eb'), // pink
   ];
 
   // Load map data
@@ -339,8 +370,6 @@
     autoPan: true,
     keepInView: true,
   });
-
-
 
   geojsonObject.addTo(map);
   map.fitBounds(bounds);
@@ -371,7 +400,7 @@
     return [min, max];
   }
   function getMean(array) {
-    const n = array.length;
+    var n = array.length;
     return array.reduce((a, b) => a + b) / n;
   }
   function getMin(array) {
@@ -381,8 +410,8 @@
     return array.reduce((a, b) => Math.max(a, b), -Number.MAX_VALUE);
   }
   function getStandardDeviation(array) {
-    const n = array.length;
-    const mean = array.reduce((a, b) => a + b) / n;
+    var n = array.length;
+    var mean = array.reduce((a, b) => a + b) / n;
     return Math.sqrt(array.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b) / n);
   }
   function div(a, b) {
@@ -537,7 +566,7 @@
       availableColors = ADAM_COLORS;
 
       if (currentMetric === 'SchoolCounselorRatio') {
-        const fillColor = districtValue <= 250
+        var fillColor = districtValue <= 250
           ? ADAM_COLORS[0]
           : districtValue <= 350
             ? ADAM_COLORS[1]
@@ -638,6 +667,21 @@
     minMax = getMinMaxs();
     updateMarkers();
     geojsonObject.resetStyle();
+  }
+  function onDistrictChange(evt) {
+    districtName = evt.target.value;
+    var district = mapData[districtName];
+    var content = getFeaturePopupContent(district.feature);
+
+    map.openPopup(content, district.feature.properties.center, {
+      maxWidth: 800,
+      minWidth: 400,
+      autoPan: true,
+      keepInView: true,
+    });
+  }
+  function onSchoolChange(evt) {
+    onDistrictChange(evt);
   }
 </script>
 <style>
